@@ -34,54 +34,128 @@ from sklearn.metrics import (
 
 print("TensorFlow Version:", tf.__version__)
 
-zip_path = "Potato.zip"
+import zipfile
+
+zip_path = "/content/Potato.zip"
 extract_path = "/content"
 
-with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+with zipfile.ZipFile(zip_path, "r") as zip_ref:
     zip_ref.extractall(extract_path)
 
-print("Dataset Extracted Successfully!")
+print("Dataset extracted successfully.")
 
-dataset_path = None
+import os
 
-for root, dirs, files in os.walk("/content"):
-    if len(dirs) >= 2:
-        dataset_path = root
-        break
+dataset_path = "/content/Potato"   # Change if your extracted folder has another name
 
-print("Dataset Folder:", dataset_path)
+print(os.listdir(dataset_path))
+
+import os
+import shutil
+from sklearn.model_selection import train_test_split
+
+SOURCE = dataset_path
+
+DEST = "/content/Potato_Split"
+
+classes = os.listdir(SOURCE)
+
+for cls in classes:
+
+    files = os.listdir(os.path.join(SOURCE, cls))
+
+    train_files, temp_files = train_test_split(
+        files,
+        test_size=0.20,
+        random_state=42,
+        shuffle=True
+    )
+
+    val_files, test_files = train_test_split(
+        temp_files,
+        test_size=0.50,
+        random_state=42,
+        shuffle=True
+    )
+
+    for split in ["train","valid","test"]:
+        os.makedirs(os.path.join(DEST, split, cls), exist_ok=True)
+
+    for f in train_files:
+        shutil.copy(
+            os.path.join(SOURCE,cls,f),
+            os.path.join(DEST,"train",cls,f)
+        )
+
+    for f in val_files:
+        shutil.copy(
+            os.path.join(SOURCE,cls,f),
+            os.path.join(DEST,"valid",cls,f)
+        )
+
+    for f in test_files:
+        shutil.copy(
+            os.path.join(SOURCE,cls,f),
+            os.path.join(DEST,"test",cls,f)
+        )
+
+print("Dataset split completed.")
+
+import tensorflow as tf
 
 IMAGE_SIZE = (224,224)
 
 BATCH_SIZE = 32
 
-SEED = 42
-
-AUTOTUNE = tf.data.AUTOTUNE
-
 train_ds = tf.keras.utils.image_dataset_from_directory(
-    dataset_path,
-    validation_split=0.2,
-    subset="training",
-    seed=SEED,
+    "/content/Potato_Split/train",
     image_size=IMAGE_SIZE,
     batch_size=BATCH_SIZE,
+    shuffle=True,
     label_mode="categorical"
 )
 
 val_ds = tf.keras.utils.image_dataset_from_directory(
-    dataset_path,
-    validation_split=0.2,
-    subset="validation",
-    seed=SEED,
+    "/content/Potato_Split/valid",
     image_size=IMAGE_SIZE,
     batch_size=BATCH_SIZE,
+    shuffle=True,
+    label_mode="categorical"
+)
+
+test_ds = tf.keras.utils.image_dataset_from_directory(
+    "/content/Potato_Split/test",
+    image_size=IMAGE_SIZE,
+    batch_size=BATCH_SIZE,
+    shuffle=False,
     label_mode="categorical"
 )
 
 class_names = train_ds.class_names
 
 print(class_names)
+
+import numpy as np
+
+print("Classes:", class_names)
+
+for name, ds in [("Train", train_ds), ("Validation", val_ds), ("Test", test_ds)]:
+    labels = np.concatenate([np.argmax(y.numpy(), axis=1) for _, y in ds])
+    unique, counts = np.unique(labels, return_counts=True)
+    print(f"\n{name} Distribution")
+    for u, c in zip(unique, counts):
+        print(f"{class_names[u]} : {c}")
+
+import numpy as np
+
+print("Classes:", class_names)
+
+for name, ds in [("Train", train_ds), ("Validation", val_ds), ("Test", test_ds)]:
+    labels = np.concatenate([np.argmax(y.numpy(), axis=1) for _, y in ds])
+    unique, counts = np.unique(labels, return_counts=True)
+    print(f"\n{name} Distribution")
+    for u, c in zip(unique, counts):
+        print(f"{class_names[u]} : {c}")
 
 train_ds = train_ds.cache().shuffle(1000).prefetch(AUTOTUNE)
 
@@ -406,3 +480,79 @@ print(f"Test Accuracy : {accuracy*100:.2f}%")
 print(f"Precision     : {precision*100:.2f}%")
 print(f"Recall        : {recall*100:.2f}%")
 print("=" * 50)
+
+import tensorflow as tf
+
+best_model = tf.keras.models.load_model("best_resnet50v2.keras")
+
+print("Best model loaded successfully.")
+
+loss, accuracy, precision, recall = best_model.evaluate(
+    test_ds,
+    verbose=1
+)
+
+print("="*60)
+print(f"Test Loss      : {loss:.4f}")
+print(f"Test Accuracy  : {accuracy*100:.2f}%")
+print(f"Precision      : {precision*100:.2f}%")
+print(f"Recall         : {recall*100:.2f}%")
+print("="*60)
+
+import numpy as np
+
+y_true = []
+y_pred = []
+y_prob = []
+
+for images, labels in test_ds:
+
+    predictions = best_model.predict(images, verbose=0)
+
+    y_true.extend(np.argmax(labels.numpy(), axis=1))
+
+    y_pred.extend(np.argmax(predictions, axis=1))
+
+    y_prob.extend(predictions)
+
+y_true = np.array(y_true)
+y_pred = np.array(y_pred)
+y_prob = np.array(y_prob)
+
+from sklearn.metrics import confusion_matrix
+import matplotlib.pyplot as plt
+import numpy as np
+
+cm = confusion_matrix(y_true, y_pred)
+
+plt.figure(figsize=(8,6))
+
+plt.imshow(cm, cmap="Blues")
+
+plt.title("Confusion Matrix")
+
+plt.colorbar()
+
+tick_marks = np.arange(len(class_names))
+
+plt.xticks(tick_marks, class_names, rotation=45)
+
+plt.yticks(tick_marks, class_names)
+
+for i in range(cm.shape[0]):
+    for j in range(cm.shape[1]):
+        plt.text(
+            j,
+            i,
+            str(cm[i, j]),
+            ha="center",
+            color="black"
+        )
+
+plt.xlabel("Predicted")
+
+plt.ylabel("Actual")
+
+plt.tight_layout()
+
+plt.show()
